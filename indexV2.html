@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8" />
+  <title>Mapa Interativo do Brasil – WebGIS Completo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css"/>
+
+  <style>
+    html, body, #map { height: 100%; margin: 0; padding: 0; }
+    .map-title {
+      position: absolute;
+      z-index: 1000;
+      top: 10px;
+      left: 10px;
+      background: rgba(255,255,255,0.9);
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-family: Arial, sans-serif;
+      font-size: 14px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+    }
+  </style>
+</head>
+<body>
+  <div class="map-title">
+    <strong>Mapa Interativo do Brasil</strong><br/>
+    Estados • Cidades • Hidroeletricidade • INCRA SIGEF • Desenho
+  </div>
+  <div id="map"></div>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+
+  <script>
+    // 1) Inicializa o mapa no Brasil
+    const map = L.map('map').setView([-14.2350, -51.9253], 4);
+
+    // 2) Camadas base
+    const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19, attribution: '© OpenStreetMap'
+    }).addTo(map);
+
+    const satelite = L.tileLayer(
+      'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      { attribution: 'Esri World Imagery', maxZoom: 23 }
+    );
+
+    const topografico = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+      maxZoom: 17, attribution: '© OpenTopoMap'
+    });
+
+    const baseMaps = {
+      "Mapa de Ruas (OSM)": osm,
+      "Imagem de Satélite": satelite,
+      "Mapa Topográfico": topografico
+    };
+
+    // 3) Estados (simplificado, exemplo)
+    const estadosBrasil = {
+      "type": "FeatureCollection",
+      "features": [
+        { "type": "Feature", "properties": { "name": "Acre" }, "geometry": { "type": "Polygon", "coordinates": [[[-74, -9], [-67, -9], [-67, -11], [-74, -11], [-74, -9]]] } },
+        { "type": "Feature", "properties": { "name": "São Paulo" }, "geometry": { "type": "Polygon", "coordinates": [[[-52, -20], [-44, -20], [-44, -25], [-52, -25], [-52, -20]]] } }
+      ]
+    };
+
+    const estadosLayer = L.geoJSON(estadosBrasil, {
+      style: { color: "#006400", weight: 2, fillOpacity: 0.1 },
+      onEachFeature: (feature, layer) => {
+        layer.bindPopup(`<strong>Estado:</strong> ${feature.properties.name}`);
+      }
+    }).addTo(map);
+
+    // 4) Cidades principais
+    const cidades = {
+      "type": "FeatureCollection",
+      "features": [
+        { "type": "Feature", "properties": { "name": "Brasília", "population": 3055149 }, "geometry": { "type": "Point", "coordinates": [-47.8825, -15.7942] } },
+        { "type": "Feature", "properties": { "name": "São Paulo", "population": 12330000 }, "geometry": { "type": "Point", "coordinates": [-46.6333, -23.5505] } },
+        { "type": "Feature", "properties": { "name": "Rio de Janeiro", "population": 6748000 }, "geometry": { "type": "Point", "coordinates": [-43.1729, -22.9068] } },
+        { "type": "Feature", "properties": { "name": "Salvador", "population": 2887000 }, "geometry": { "type": "Point", "coordinates": [-38.5014, -12.9714] } },
+        { "type": "Feature", "properties": { "name": "Fortaleza", "population": 2687000 }, "geometry": { "type": "Point", "coordinates": [-38.5431, -3.7172] } }
+      ]
+    };
+
+    const cidadesLayer = L.geoJSON(cidades, {
+      pointToLayer: (feature, latlng) => L.circleMarker(latlng, { radius: 6, color: "red" }),
+      onEachFeature: (feature, layer) => {
+        const props = feature.properties;
+        layer.bindPopup(`<strong>${props.name}</strong><br/>População: ${props.population.toLocaleString("pt-BR")}`);
+      }
+    }).addTo(map);
+
+    // 5) Controle de camadas
+    const overlays = {
+      "Estados (GeoJSON)": estadosLayer,
+      "Cidades (GeoJSON)": cidadesLayer
+    };
+    const layerControl = L.control.layers(baseMaps, overlays, { collapsed: false }).addTo(map);
+
+    // 6) Escala
+    L.control.scale({ imperial: false, metric: true }).addTo(map);
+
+    // 7) Ferramenta de desenho
+    const drawnItems = new L.FeatureGroup().addTo(map);
+    const drawControl = new L.Control.Draw({
+      edit: { featureGroup: drawnItems },
+      draw: {
+        polygon: { tooltip: { start: "Clique para desenhar o polígono" } },
+        polyline: { tooltip: { start: "Clique para desenhar a linha" } },
+        rectangle: { tooltip: { start: "Clique e arraste para desenhar o retângulo" } },
+        circle: false,
+        marker: { tooltip: { start: "Clique no mapa para adicionar um marcador" } },
+        circlemarker: false
+      }
+    });
+    map.addControl(drawControl);
+
+    map.on(L.Draw.Event.CREATED, function (e) {
+      drawnItems.addLayer(e.layer);
+    });
+
+    // 8) Camada WFS (Hidroeletricidade)
+    fetch("https://geoserver.vigente.com.br/geoserver/ows?service=WFS&version=2.0.0&request=GetFeature&typeNames=VigenteApp:ana_hidroeletricidade_br&CQL_FILTER=Cruza like '%25510 3403%25'&outputFormat=application/json&exceptions=application/json&startIndex=0&count=200&authkey=907b629a-e843-4879-911b-0ff4223cf9fc")
+      .then(resp => resp.json())
+      .then(data => {
+        const hidroLayer = L.geoJSON(data, {
+          pointToLayer: (feature, latlng) =>
+            L.circleMarker(latlng, { radius: 6, color: "blue", fillColor: "#00f", fillOpacity: 0.6 }),
+          onEachFeature: (feature, layer) => {
+            let props = feature.properties;
+            let info = `<strong>Usina:</strong> ${props.nome || "Sem nome"}<br/>`;
+            info += `<strong>Município:</strong> ${props.municipio || "-"}<br/>`;
+            info += `<strong>Potência:</strong> ${props.potencia || "-"} MW`;
+            layer.bindPopup(info);
+          }
+        }).addTo(map);
+        layerControl.addOverlay(hidroLayer, "Hidroeletricidade (GeoServer)");
+      });
+
+    // 9) Camada INCRA SIGEF (via GitHub)
+    fetch("https://raw.githubusercontent.com/lcfj97/teste/main/INCRA%20SIGEF%20MT.qmd")
+      .then(resp => resp.json())
+      .then(data => {
+        const sigefLayer = L.geoJSON(data, {
+          style: { color: "orange", weight: 2, fillOpacity: 0.2 },
+          onEachFeature: (feature, layer) => {
+            let props = feature.properties || {};
+            let info = `<strong>Imóvel:</strong> ${props.nome || "Sem nome"}<br/>`;
+            info += `<strong>Matrícula:</strong> ${props.matricula || "-"}<br/>`;
+            info += `<strong>Área:</strong> ${props.area || "-"} ha`;
+            layer.bindPopup(info);
+          }
+        }).addTo(map);
+        layerControl.addOverlay(sigefLayer, "INCRA SIGEF (GitHub)");
+      });
+  </script>
+</body>
+</html>
